@@ -8,7 +8,7 @@ from kemsekov_torch.recurrent_layer import RecurrentLayer
 
 from kemsekov_torch.common_modules import (
     Residual, Transpose, SwiGLU,ConcatTensors,SumTensors,
-    StepSequential,StepState,init_module_state,step_module
+    StepState,init_module_state,step_module
 )
 import torch
 import torch.nn as nn
@@ -71,7 +71,7 @@ class AutoregressiveChar(nn.Module):
             
         def get_imp():
             if impl=='attn':
-                return StepSequential(
+                return nn.Sequential(
                     Transpose(1,-1),
                     SelfAttention(
                         internal_dim,
@@ -88,7 +88,7 @@ class AutoregressiveChar(nn.Module):
                     mlp()
                 )
             if impl=='gd2':
-                return StepSequential(
+                return nn.Sequential(
                     GatedDelta2Scan(
                         dim=internal_dim,
                         heads=heads,
@@ -117,7 +117,7 @@ class AutoregressiveChar(nn.Module):
                 return imp
             return RecurrentLayer(imp,internal_dim,max_recurrence=recurrence)
 
-        self.middle=StepSequential(*[
+        self.middle=nn.Sequential(*[
             get_layer()
             for i in range(layers)
         ])
