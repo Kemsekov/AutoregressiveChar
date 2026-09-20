@@ -3,8 +3,12 @@ from typing import Literal
 #both implement re-zero approach
 from kemsekov_torch.attention import SelfAttention
 from kemsekov_torch.gated_delta_2 import GatedDelta2Scan
+from kemsekov_torch.recurrent_layer import RecurrentLayer
 
-from kemsekov_torch.common_modules import Residual, Transpose, SwiGLU,ConcatTensors,SumTensors,StepSequential,StepState
+from kemsekov_torch.common_modules import (
+    Residual, Transpose, SwiGLU,ConcatTensors,SumTensors,
+    StepSequential,StepState,init_module_state,step_module
+)
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -48,6 +52,7 @@ class AutoregressiveChar(nn.Module):
         heads=8,
         impl:Literal['attn','gd2']="attn",
         merge_implementation:Literal['concat','sum']='sum',
+        recurrence:int|None=None,
     ):
         super().__init__()
 
@@ -98,8 +103,14 @@ class AutoregressiveChar(nn.Module):
         if merge_implementation=='sum':
             self.merge_activations=SumTensors()
         
+        def get_layer():
+            imp = get_imp()
+            if recurrence is None:
+                return imp
+            return RecurrentLayer(imp,internal_dim,max_recurrence=recurrence)
+
         self.middle=StepSequential(*[
-            get_imp()
+            get_layer()
             for i in range(layers)
         ])
         self.decode=nn.Linear(
@@ -120,9 +131,15 @@ class AutoregressiveChar(nn.Module):
 
         The state is opaque: it is a nested structure mirroring the model
         layers, each holding whatever its implementation needs (KV cache for
-        attention, memory matrix for gated delta, ...).
+        attention, memory matrix for gated delta, per-application caches for
+        recurrent wrappers, ...). The tree is discovered by reflecting over
+        ``self.middle``, so new wrappers (e.g. ``RecurrentLayer``,
+        ``AttentionResidual``) compose automatically as long as they implement
+        ``init_state``/``step``; a wrapper with stateful children that forgets
+        to implement them raises instead of silently running full-sequence
+        ``forward``.
         """
-        return self.middle.init_state(batch_size, device=device, dtype=dtype)
+        return init_module_state(self.middle,batch_size,device=device,dtype=dtype)
 
     def step(self, ind, state=None):
         """
@@ -139,7 +156,7 @@ class AutoregressiveChar(nn.Module):
             state = self.init_state(ind.shape[0], device=ind.device, dtype=self.decode.weight.dtype)
         x = self.encode(ind)
         x = self.merge_activations([x, torch.zeros_like(x)])
-        x, state = self.middle.step(x, state)
+        x, state = step_module(self.middle,x,state)
         return x, self.decode(x), state
 
     def generate(self, ind, max_new_tokens, temp=0.7, top_p=0.9):
@@ -166,7 +183,7 @@ class AutoregressiveChar(nn.Module):
             # prefill the prompt in one parallel chunk
             x = self.encode(ind)
             x = self.merge_activations([x, torch.zeros_like(x)])
-            x, state = self.middle.step(x, state)
+            x, state = step_module(self.middle,x,state)
             logits = self.decode(x)[:,-1]
             for _ in range(max_new_tokens):
                 next_token = sample(logits,temp=temp,top_p=top_p)
@@ -174,7 +191,7 @@ class AutoregressiveChar(nn.Module):
                 # one incremental step per new token
                 x = self.encode(next_token[:,None])
                 x = self.merge_activations([x, torch.zeros_like(x)])
-                x, state = self.middle.step(x, state)
+                x, state = step_module(self.middle,x,state)
                 logits = self.decode(x)[:,-1]
 
     def params_count(self):
