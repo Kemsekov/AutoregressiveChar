@@ -40,8 +40,10 @@ class Embedding(nn.Module):
         
     def forward(self, input):
         # Input is expected to be a tensor of indices
-        output = torch.nn.functional.embedding(input, self.weight) + self.bias
-        return output
+        return torch.nn.functional.embedding(input, self.weight)
+
+    def encode(self,ind): return self(ind)
+    
     def decode(self,act):
         return act@self.weight.T
     
@@ -95,7 +97,7 @@ class AutoregressiveChar(nn.Module):
                     mlp()
                 )
         
-        self.encode = Embedding(
+        self.emb = Embedding(
             vocab_size,embedding_size=internal_dim
         )
         
@@ -119,7 +121,10 @@ class AutoregressiveChar(nn.Module):
         ])
         
     def decode(self,x):
-        return self.encode.decode(x)
+        return self.emb.decode(x)
+    
+    def encode(self,x):
+        return self.emb.encode(x)
     
     def forward(self,ind,previous_activations = None):
         x = self.encode(ind)
@@ -157,7 +162,7 @@ class AutoregressiveChar(nn.Module):
         if ind.dim()==1:
             ind = ind[:,None]
         if state is None:
-            state = self.init_state(ind.shape[0], device=ind.device, dtype=self.encode.weight.dtype)
+            state = self.init_state(ind.shape[0], device=ind.device, dtype=self.emb.weight.dtype)
         x = self.encode(ind)
         x = self.merge_activations([x, torch.zeros_like(x)])
         x, state = step_module(self.middle,x,state)
@@ -183,7 +188,7 @@ class AutoregressiveChar(nn.Module):
         ind = ind.to(next(self.parameters()).device)
 
         with torch.no_grad():
-            state = self.init_state(ind.shape[0], device=ind.device, dtype=self.encode.weight.dtype)
+            state = self.init_state(ind.shape[0], device=ind.device, dtype=self.emb.weight.dtype)
             # prefill the prompt in one parallel chunk
             x = self.encode(ind)
             x = self.merge_activations([x, torch.zeros_like(x)])
