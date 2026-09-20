@@ -34,6 +34,7 @@ class Embedding(nn.Module):
     def reset_parameters(self):
         # Initialize weights with a normal distribution
         std = 1.0 / (self.vocab_size**0.5)
+        
         nn.init.normal_(self.weight, mean=0.0, std=std)
         # Initialize bias to zeros
         nn.init.zeros_(self.bias)
@@ -80,7 +81,8 @@ class AutoregressiveChar(nn.Module):
                         add_alibi=True,
                         prenorm='rms',
                         is_causal=True,
-                        dimensions=1
+                        dimensions=1,
+                        xsa=True
                     ),
                     Transpose(1,-1),
                     mlp()
