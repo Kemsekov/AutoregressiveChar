@@ -67,7 +67,7 @@ class AutoregressiveChar(nn.Module):
                         heads=heads,
                         kv_heads=heads//2,
                         head_dim=64,
-                        add_absolute_pos=True,
+                        add_alibi=True,
                         prenorm='rms',
                         is_causal=True,
                         dimensions=1

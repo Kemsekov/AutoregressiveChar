@@ -15,8 +15,9 @@ if args.seed is not None:
 
 tokenizer=torch.load("tokenizer.pt",weights_only=False)
 
-model = AutoregressiveChar(tokenizer.vocab_size,256,layers=1,mlp_factor=1,impl='attn')
-model=load_last_checkpoint(model,"runs/test-autoregressive-attn-padmask").eval().cuda()
+# model = AutoregressiveChar(tokenizer.vocab_size,256,layers=1,mlp_factor=1,impl='attn')
+model=AutoregressiveChar(tokenizer.vocab_size,256,layers=3,mlp_factor=4,impl='attn')
+model=load_last_checkpoint(model,"runs/test-autoregressive-attn-alibi").eval().cuda()
 
 
 ids = tokenizer.encode(args.prompt).tolist()
