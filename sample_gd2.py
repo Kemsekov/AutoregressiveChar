@@ -20,12 +20,10 @@ model = AutoregressiveChar(tokenizer.vocab_size,256,layers=1,mlp_factor=1,impl='
 
 model=load_last_checkpoint(model,"runs/test-autoregressive-gd2-padmask").eval().cuda()
 
-
 ids = tokenizer.encode(args.prompt).tolist()
 
-
 start_time=time.time()
-with torch.no_grad():
+with torch.inference_mode():
     prompt=torch.tensor([ids],device='cuda')
     print(tokenizer.decode(prompt[0].cpu()),end="",flush=True)
     for t in model.generate(prompt,args.to_generate,temp=0.7):

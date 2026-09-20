@@ -1,3 +1,4 @@
+import math
 from typing import Literal
 
 #both implement re-zero approach
@@ -41,7 +42,9 @@ class Embedding(nn.Module):
         # Input is expected to be a tensor of indices
         output = torch.nn.functional.embedding(input, self.weight) + self.bias
         return output
-
+    def decode(self,act):
+        return act@self.weight.T
+    
 class AutoregressiveChar(nn.Module):
     def __init__(
         self,
@@ -91,6 +94,7 @@ class AutoregressiveChar(nn.Module):
                     ),
                     mlp()
                 )
+        
         self.encode = Embedding(
             vocab_size,embedding_size=internal_dim
         )
@@ -113,10 +117,10 @@ class AutoregressiveChar(nn.Module):
             get_layer()
             for i in range(layers)
         ])
-        self.decode=nn.Linear(
-            internal_dim,vocab_size,bias=False
-        )
         
+    def decode(self,x):
+        return self.encode.decode(x)
+    
     def forward(self,ind,previous_activations = None):
         x = self.encode(ind)
         previous_activations=x*0 if previous_activations is None else previous_activations
@@ -153,7 +157,7 @@ class AutoregressiveChar(nn.Module):
         if ind.dim()==1:
             ind = ind[:,None]
         if state is None:
-            state = self.init_state(ind.shape[0], device=ind.device, dtype=self.decode.weight.dtype)
+            state = self.init_state(ind.shape[0], device=ind.device, dtype=self.encode.weight.dtype)
         x = self.encode(ind)
         x = self.merge_activations([x, torch.zeros_like(x)])
         x, state = step_module(self.middle,x,state)
@@ -179,7 +183,7 @@ class AutoregressiveChar(nn.Module):
         ind = ind.to(next(self.parameters()).device)
 
         with torch.no_grad():
-            state = self.init_state(ind.shape[0], device=ind.device, dtype=self.decode.weight.dtype)
+            state = self.init_state(ind.shape[0], device=ind.device, dtype=self.encode.weight.dtype)
             # prefill the prompt in one parallel chunk
             x = self.encode(ind)
             x = self.merge_activations([x, torch.zeros_like(x)])
