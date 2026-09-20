@@ -5,10 +5,11 @@ from typing import Literal
 from kemsekov_torch.attention import SelfAttention
 from kemsekov_torch.gated_delta_2 import GatedDelta2Scan
 from kemsekov_torch.recurrent_layer import RecurrentLayer
+from kemsekov_torch.attention_residual import AttentionResidual
 
 from kemsekov_torch.common_modules import (
     Residual, Transpose, SwiGLU,ConcatTensors,SumTensors,
-    StepState,init_module_state,step_module
+    init_module_state,step_module
 )
 import torch
 import torch.nn as nn
@@ -117,10 +118,10 @@ class AutoregressiveChar(nn.Module):
                 return imp
             return RecurrentLayer(imp,internal_dim,max_recurrence=recurrence)
 
-        self.middle=nn.Sequential(*[
+        self.middle=AttentionResidual([
             get_layer()
             for i in range(layers)
-        ])
+        ],internal_dim,-1)
         
     def decode(self,x):
         return self.emb.decode(x)
