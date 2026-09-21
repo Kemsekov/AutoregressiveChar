@@ -8,7 +8,7 @@ from kemsekov_torch.train import load_last_checkpoint
 internal_dim=256
 
 # how many times repeat in a loop same layer. integer or None
-reccurence=None
+reccurence=2
 
 #model layers
 layers=3

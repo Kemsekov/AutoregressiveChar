@@ -9,11 +9,85 @@ from kemsekov_torch.attention_residual import AttentionResidual
 
 from kemsekov_torch.common_modules import (
     Residual, Transpose, SwiGLU,ConcatTensors,SumTensors,
-    init_module_state,step_module
+    init_module_state,step_module, wrap_submodules
 )
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+def init_linear_superposition(layer: nn.Linear, allowed_interference: float = 0.01):
+    """
+    Initializes a nn.Linear layer's weights to support uniform superposition 
+    using an Equiangular Tight Frame based on the Welch Bound.
+    Sets bias to 0.
+    
+    Args:
+        layer (nn.Linear): The linear layer to initialize.
+        allowed_interference (float): The maximum allowed dot product (epsilon) between features.
+        
+    Returns:
+        layer (nn.Linear): The initialized layer.
+        num_features (int): The maximum number of packable features found.
+    """
+    print("init!")
+    # D is the intrinsic dimension of the space (the smaller bottleneck size)
+    # For a standard feature projection, we assume out_features maps to the feature space
+    D = min(layer.in_features, layer.out_features)
+    M = max(layer.in_features, layer.out_features)
+    
+    eps = allowed_interference
+    
+    # 1. Calculate max theoretical features (N) using the inverse Welch Bound
+    denominator = 1.0 - (D * (eps ** 2))
+    
+    if denominator > 0:
+        N_theoretical = (D * (1.0 - eps ** 2)) / denominator
+        # We can't pack more features than the matrix physical bounds allow (M)
+        num_features = min(int(math.floor(N_theoretical)), M)
+    else:
+        # If D is too large for the requested epsilon, we fall back to perfect orthogonality
+        num_features = D
+
+    # Ensure num_features is at least equal to our dimension size
+    num_features = max(num_features, D)
+    
+    print(f"[Superposition Init] Dimension D={D} | Max Allowed Interference={eps}")
+    print(f"[Superposition Init] Packed {num_features} features into {D} dimensions.")
+
+    # 2. Build the Tight Frame via QR Decomposition
+    # Start with a random matrix of the feature size
+    X = torch.randn(num_features, num_features)
+    Q, _ = torch.linalg.qr(X)  # Q is a perfectly orthogonal matrix [N, N]
+    
+    # Truncate Q to project our N features down into D dimensions
+    # This forms a tight frame matrix of shape [num_features, D]
+    tight_frame = Q[:, :D]
+    
+    # Scale it so the frame maintains structural unity: W^T * W = (N/D) * I
+    tight_frame = tight_frame * math.sqrt(num_features / D)
+    
+    # 3. Fit the tight frame into the target nn.Linear weight shape
+    with torch.no_grad():
+        # Handle both encoding (D -> N) and decoding (N -> D) orientations
+        if layer.weight.shape == (num_features, D):
+            layer.weight.copy_(tight_frame)
+        elif layer.weight.shape == (D, num_features):
+            layer.weight.copy_(tight_frame.T)
+        else:
+            # Fallback padding if dims don't match the exact feature calculation
+            # Pads or truncates to match the physical nn.Linear dimensions precisely
+            target_shape = layer.weight.shape
+            padded_tf = torch.zeros(target_shape)
+            h, w = min(target_shape[0], tight_frame.shape[0]), min(target_shape[1], tight_frame.shape[1])
+            padded_tf[:h, :w] = tight_frame[:h, :w]
+            layer.weight.copy_(padded_tf)
+            
+        # 4. Zero out the bias completely as requested
+        if layer.bias is not None:
+            layer.bias.zero_()
+            
+    return layer
 
 # module to convert text tokens to vector
 class Embedding(nn.Module):
@@ -122,6 +196,8 @@ class AutoregressiveChar(nn.Module):
             get_layer()
             for i in range(layers)
         ],internal_dim,-1)
+        
+        # wrap_submodules(self.emb,nn.Linear,init_linear_superposition)
         
     def decode(self,x):
         return self.emb.decode(x)
