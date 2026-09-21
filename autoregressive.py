@@ -14,7 +14,7 @@ from kemsekov_torch.common_modules import (
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from kemsekov_torch.text_tools import Embedding
 
 def init_linear_superposition(layer: nn.Linear, allowed_interference: float = 0.01):
     """
@@ -89,39 +89,6 @@ def init_linear_superposition(layer: nn.Linear, allowed_interference: float = 0.
             
     return layer
 
-# module to convert text tokens to vector
-class Embedding(nn.Module):
-    """
-    Module for token to embedding vector learning
-    """
-    def __init__(self, vocab_size, embedding_size):
-        super().__init__()
-        self.vocab_size = vocab_size
-        self.embedding_size = embedding_size
-
-        # Initialize weights and bias
-        self.weight = nn.Parameter(torch.Tensor(vocab_size, embedding_size))
-        self.bias = nn.Parameter(torch.Tensor(embedding_size))
-
-        self.reset_parameters()
-
-    #normal init
-    def reset_parameters(self):
-        # Initialize weights with a normal distribution
-        std = 1.0 / (self.vocab_size**0.5)
-        
-        nn.init.normal_(self.weight, mean=0.0, std=std)
-        # Initialize bias to zeros
-        nn.init.zeros_(self.bias)
-        
-    def forward(self, input):
-        # Input is expected to be a tensor of indices
-        return torch.nn.functional.embedding(input, self.weight)
-
-    def encode(self,ind): return self(ind)
-    
-    def decode(self,act):
-        return act@self.weight.T
     
 class AutoregressiveChar(nn.Module):
     def __init__(
@@ -138,11 +105,13 @@ class AutoregressiveChar(nn.Module):
         super().__init__()
 
         def mlp():
-            return Residual([
+            m = Residual([
                 nn.RMSNorm(internal_dim),
                 SwiGLU(internal_dim,internal_dim*mlp_factor),
                 nn.Linear(internal_dim*mlp_factor,internal_dim),
             ])
+            # wrap_submodules(m,nn.Linear,init_linear_superposition)
+            return m
             
         def get_imp():
             if impl=='attn':
