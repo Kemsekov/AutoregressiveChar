@@ -98,7 +98,7 @@ class AutoregressiveChar(nn.Module):
         layers=3,
         mlp_factor=4,
         heads=8,
-        impl:Literal['attn','gd2']="attn",
+        linear_attn_aspect_ratio=4,
         merge_implementation:Literal['concat','sum']='sum',
         recurrence:int|None=None,
     ):
@@ -108,19 +108,18 @@ class AutoregressiveChar(nn.Module):
             m = Residual([
                 nn.RMSNorm(internal_dim),
                 SwiGLU(internal_dim,internal_dim*mlp_factor),
-                nn.Linear(internal_dim*mlp_factor,internal_dim),
             ])
             # wrap_submodules(m,nn.Linear,init_linear_superposition)
             return m
             
-        def get_imp():
+        def get_imp(impl):
             if impl=='attn':
                 return nn.Sequential(
                     Transpose(1,-1),
                     SelfAttention(
                         internal_dim,
                         heads=heads,
-                        kv_heads=heads//2,
+                        kv_heads=heads//4,
                         head_dim=64,
                         add_alibi=True,
                         prenorm='rms',
@@ -136,7 +135,7 @@ class AutoregressiveChar(nn.Module):
                     GatedDelta2Scan(
                         dim=internal_dim,
                         heads=heads,
-                        kv_heads=heads//2,
+                        kv_heads=heads//4,
                         QK_dim=64,
                         V_dim=64
                     ),
@@ -155,14 +154,16 @@ class AutoregressiveChar(nn.Module):
         if merge_implementation=='sum':
             self.merge_activations=SumTensors()
         
-        def get_layer():
-            imp = get_imp()
+        def get_layer(impl):
+            print(impl)
+            imp = get_imp(impl)
             if recurrence is None:
                 return imp
             return RecurrentLayer(imp,internal_dim,max_recurrence=recurrence)
+            # return RecurrentLayer1(imp,max_recurrence=recurrence)
 
         self.middle=AttentionResidual([
-            get_layer()
+            get_layer('attn' if ((1+i)%linear_attn_aspect_ratio==0 or i==layers-1) else 'gd2')
             for i in range(layers)
         ],internal_dim,-1)
         
@@ -216,7 +217,7 @@ class AutoregressiveChar(nn.Module):
         x, state = step_module(self.middle,x,state)
         return x, self.decode(x), state
 
-    def generate(self, ind, max_new_tokens, temp=0.7, top_p=0.9):
+    def generate(self, ind, max_new_tokens, temp=0.7, top_p=0.9,return_activations=False):
         """
         Autoregressive generation with incremental state.
 
@@ -244,7 +245,8 @@ class AutoregressiveChar(nn.Module):
             logits = self.decode(x)[:,-1]
             for _ in range(max_new_tokens):
                 next_token = sample(logits,temp=temp,top_p=top_p)
-                yield next_token
+
+                yield (x,next_token) if return_activations else next_token
                 # one incremental step per new token
                 x = self.encode(next_token[:,None])
                 x = self.merge_activations([x, torch.zeros_like(x)])
